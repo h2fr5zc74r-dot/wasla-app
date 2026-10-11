@@ -1,42 +1,141 @@
-import React, { useEffect, useState } from 'react';
-import { Alert, SafeAreaView, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View, ActivityIndicator } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import * as Location from 'expo-location';
-import { io } from 'socket.io-client';
+'use client';
+import React, { useState } from 'react';
 
-// IMPORTANT: change this to your computer's LAN IP for a physical phone, e.g. http://192.168.1.20:4000
-// Android emulator usually uses http://10.0.2.2:4000. Never use localhost on a physical phone.
-const API_URL = 'http://192.168.1.20:4000';
-const money = n => `${Number(n || 0).toFixed(2)} ر.س`;
-export default function App() {
-  const [mode,setMode] = useState('rider');
-  const [name,setName] = useState(''); const [phone,setPhone] = useState(''); const [password,setPassword] = useState('');
-  const [token,setToken] = useState(null); const [user,setUser] = useState(null); const [busy,setBusy] = useState(false);
-  const [pickup,setPickup] = useState('موقعي الحالي'); const [destination,setDestination] = useState('الوجهة');
-  const [coords,setCoords] = useState(null); const [destLat,setDestLat] = useState('24.7136'); const [destLng,setDestLng] = useState('46.6753');
-  const [rides,setRides] = useState([]); const [activeRide,setActiveRide] = useState(null); const [socket,setSocket] = useState(null);
-  const request = async (path, options={}) => {
-    const res = await fetch(`${API_URL}${path}`, { ...options, headers: { 'Content-Type':'application/json', ...(token ? {Authorization:`Bearer ${token}`} : {}), ...(options.headers||{}) } });
-    const data = await res.json().catch(()=>({})); if (!res.ok) throw new Error(data.error || 'تعذر الاتصال بالخادم'); return data;
+export default function Home() {
+  const [selectedService, setSelectedService] = useState('ركوب');
+  const [pickup, setPickup] = useState('حي الزهراء');
+  const [dropoff, setDropoff] = useState('طريق الملك فهد');
+  const [isConfirmed, setIsConfirmed] = useState(false);
+  const [tripRequested, setTripRequested] = useState(false);
+
+  const services = [
+    { id: 'ركوب', label: 'ركوب 🚕', fare: 12, est: '4 دقائق' },
+    { id: 'طعام', label: 'طعام 🍔', fare: 15, est: '25 دقيقة' },
+    { id: 'البقالة', label: 'البقالة 🛒', fare: 10, est: '15 دقيقة' },
+    { id: 'سيارة أجرة', label: 'سيارة أجرة 🚘', fare: 20, est: '5 دقائق' },
+    { id: 'ساعي', label: 'ساعي 📦', fare: 18, est: '30 دقيقة' },
+    { id: 'الرعاية المنزلية', label: 'الرعاية المنزلية 🧰', fare: 50, est: '45 دقيقة' },
+  ];
+
+  const currentServiceObj = services.find((s) => s.id === selectedService) || services[0];
+
+  const handleConfirmOrder = () => {
+    setIsConfirmed(true);
+    setTripRequested(true);
   };
-  useEffect(()=>{ (async()=>{ const saved=await AsyncStorage.getItem('mashwar-session'); if(saved){const s=JSON.parse(saved);setToken(s.token);setUser(s.user);setMode(s.user.role);} })(); },[]);
-  useEffect(()=>{ if(!token)return; const s=io(API_URL,{auth:{token},transports:['websocket']}); setSocket(s); s.on('ride:update',r=>{setActiveRide(old=>old?.id===r.id?r:old);setRides(old=>[r,...old.filter(x=>x.id!==r.id)]);}); s.on('ride:available',r=>{if(r)setRides(old=>[r,...old.filter(x=>x.id!==r.id)]);}); return()=>{s.disconnect();setSocket(null);}; },[token]);
-  useEffect(()=>{ if(user) refresh(); },[user]);
-  const refresh = async()=>{ try{const d=await request(user?.role==='driver'?'/api/rides/available':'/api/rides/mine');setRides(d.rides||[]);}catch(e){/* shown on user action */} };
-  const registerOrLogin = async (register) => { setBusy(true); try {const d=await request(register?'/api/auth/register':'/api/auth/login',{method:'POST',body:JSON.stringify(register?{name,phone,password,role:mode}:{phone,password})}); await AsyncStorage.setItem('mashwar-session',JSON.stringify(d));setToken(d.token);setUser(d.user);setMode(d.user.role); } catch(e){Alert.alert('تعذر الدخول',e.message);} finally{setBusy(false);} };
-  const getLocation = async()=>{const p=await Location.requestForegroundPermissionsAsync();if(p.status!=='granted')throw new Error('اسمح للتطبيق بالوصول إلى الموقع');const l=await Location.getCurrentPositionAsync({});setCoords({lat:l.coords.latitude,lng:l.coords.longitude});};
-  const createRide = async()=>{setBusy(true);try{await getLocation();const l=await Location.getCurrentPositionAsync({});const d=await request('/api/rides',{method:'POST',body:JSON.stringify({pickup:{lat:l.coords.latitude,lng:l.coords.longitude,label:pickup},destination:{lat:Number(destLat),lng:Number(destLng),label:destination}})});setActiveRide(d.ride);setRides([d.ride,...rides]);socket?.emit('ride:join',d.ride.id);Alert.alert('تم الطلب',`التقدير الأولي: ${money(d.ride.fare_sar)}. السعر ليس نهائيًا.`);}catch(e){Alert.alert('تعذر طلب الرحلة',e.message);}finally{setBusy(false);}};
-  const accept = async r=>{try{const d=await request(`/api/rides/${r.id}/accept`,{method:'POST'});setActiveRide(d.ride);socket?.emit('ride:join',r.id);Alert.alert('تم قبول الرحلة','تواصل مع الراكب عبر القنوات المعتمدة في تطبيقك.');}catch(e){Alert.alert('تعذر القبول',e.message);}};
-  const status = async (r,s)=>{try{const d=await request(`/api/rides/${r.id}/status`,{method:'POST',body:JSON.stringify({status:s})});setActiveRide(d.ride);setRides(old=>old.map(x=>x.id===r.id?d.ride:x));}catch(e){Alert.alert('تعذر تحديث الرحلة',e.message);}};
-  const cancel = async r=>{try{const d=await request(`/api/rides/${r.id}/cancel`,{method:'POST'});setActiveRide(d.ride);setRides(old=>old.map(x=>x.id===r.id?d.ride:x));}catch(e){Alert.alert('تعذر الإلغاء',e.message);}};
-  const logout=async()=>{await AsyncStorage.removeItem('mashwar-session');socket?.disconnect();setToken(null);setUser(null);setActiveRide(null);setRides([]);};
-  const btn=(label,onPress,secondary=false)=><TouchableOpacity style={[styles.button,secondary&&styles.secondary]} onPress={onPress} disabled={busy}><Text style={[styles.buttonText,secondary&&styles.secondaryText]}>{label}</Text></TouchableOpacity>;
-  const field=(label,value,onChange,placeholder='',keyboardType='default')=><View style={styles.field}><Text style={styles.label}>{label}</Text><TextInput style={styles.input} value={value} onChangeText={onChange} placeholder={placeholder} keyboardType={keyboardType} placeholderTextColor="#89929b"/></View>;
-  if(!token)return <SafeAreaView style={styles.safe}><ScrollView contentContainerStyle={styles.container}><Text style={styles.brand}>مشوار</Text><Text style={styles.subtitle}>رحلتك تبدأ هنا</Text><View style={styles.switch}>{['rider','driver'].map(x=><TouchableOpacity key={x} style={[styles.pill,mode===x&&styles.pillActive]} onPress={()=>setMode(x)}><Text style={[styles.pillText,mode===x&&styles.pillTextActive]}>{x==='rider'?'راكب':'سائق'}</Text></TouchableOpacity>)}</View>{mode==='driver'&&<Text style={styles.note}>التسجيل كسائق هنا تجريبي ولا يتحقق من الهوية أو رخصة القيادة أو أهلية المركبة.</Text>}{field('الاسم (للتسجيل)',name,setName,'الاسم')}{field('رقم الجوال',phone,setPhone,'05xxxxxxxx','phone-pad')}{field('كلمة المرور',password,setPassword,'8 أحرف على الأقل')}{busy?<ActivityIndicator/>:<>{btn('إنشاء حساب',()=>registerOrLogin(true))}{btn('لدي حساب — تسجيل الدخول',()=>registerOrLogin(false),true)}</>}</ScrollView></SafeAreaView>;
-  return <SafeAreaView style={styles.safe}><ScrollView contentContainerStyle={styles.container}><View style={styles.header}><View><Text style={styles.brand}>مشوار</Text><Text style={styles.subtitle}>مرحبًا {user?.name}</Text></View>{btn('خروج',logout,true)}</View><View style={styles.switch}>{['rider','driver'].map(x=><TouchableOpacity key={x} style={[styles.pill,mode===x&&styles.pillActive]} onPress={()=>setMode(x)}><Text style={[styles.pillText,mode===x&&styles.pillTextActive]}>{x==='rider'?'راكب':'سائق'}</Text></TouchableOpacity>)}</View>
-  {mode==='rider'?<><Text style={styles.section}>اطلب مشوارك</Text>{field('نقطة الانطلاق',pickup,setPickup,'موقعي الحالي')}{field('الوجهة',destination,setDestination,'اسم المكان')}{field('خط العرض للوجهة',destLat,setDestLat,'24.7136','decimal-pad')}{field('خط الطول للوجهة',destLng,setDestLng,'46.6753','decimal-pad')}{btn(busy?'جارٍ التنفيذ...':'تحديد موقعي وطلب رحلة',createRide)}<Text style={styles.note}>نسخة تجريبية: تدخل إحداثيات الوجهة يدويًا. الخريطة والتوجيه الفعلي وحساب السعر النهائي غير مفعّلة.</Text></>:<><Text style={styles.section}>الرحلات المتاحة</Text>{btn('تحديث الرحلات',refresh,true)}</>}
-  {activeRide&&<View style={styles.card}><Text style={styles.cardTitle}>الرحلة الحالية #{activeRide.id}</Text><Text style={styles.item}>الحالة: {activeRide.status}</Text><Text style={styles.item}>من: {activeRide.pickup_label}</Text><Text style={styles.item}>إلى: {activeRide.dest_label}</Text><Text style={styles.item}>التقدير: {money(activeRide.fare_sar)}</Text>{activeRide.status==='accepted'&&mode==='driver'&&btn('وصلت إلى الراكب',()=>status(activeRide,'arrived'))}{activeRide.status==='arrived'&&mode==='driver'&&btn('بدء الرحلة',()=>status(activeRide,'in_progress'))}{activeRide.status==='in_progress'&&mode==='driver'&&btn('إنهاء الرحلة',()=>status(activeRide,'completed'))}{!['completed','cancelled'].includes(activeRide.status)&&btn('إلغاء الرحلة',()=>cancel(activeRide),true)}</View>}
-  {rides.map(r=><View key={r.id} style={styles.card}><Text style={styles.cardTitle}>رحلة #{r.id}</Text><Text style={styles.item}>من: {r.pickup_label}</Text><Text style={styles.item}>إلى: {r.dest_label}</Text><Text style={styles.item}>الحالة: {r.status} · {money(r.fare_sar)}</Text>{mode==='driver'&&r.status==='searching'&&btn('قبول الرحلة',()=>accept(r))}{mode==='rider'&&r.rider_id===user?.id&&!['completed','cancelled'].includes(r.status)&&btn('إلغاء الرحلة',()=>cancel(r),true)}</View>)}
-  <Text style={styles.footer}>نسخة تطوير أولية — لا تستخدم لنقل ركاب فعليين قبل إكمال الأمن والخرائط والدفع والتحقق من السائقين والامتثال للأنظمة.</Text></ScrollView></SafeAreaView>;
-}
-const styles=StyleSheet.create({safe:{flex:1,backgroundColor:'#f4f6f8'},container:{padding:22,paddingBottom:40},header:{flexDirection:'row',justifyContent:'space-between',alignItems:'center'},brand:{fontSize:34,fontWeight:'900',color:'#122b3a',textAlign:'right'},subtitle:{fontSize:15,color:'#65727c',textAlign:'right',marginBottom:18},section:{fontSize:22,fontWeight:'800',color:'#122b3a',textAlign:'right',marginTop:18,marginBottom:10},switch:{flexDirection:'row',backgroundColor:'#e4e9ed',padding:4,borderRadius:14,marginBottom:18},pill:{flex:1,padding:12,borderRadius:11,alignItems:'center'},pillActive:{backgroundColor:'#122b3a'},pillText:{fontWeight:'700',color:'#344652'},pillTextActive:{color:'#fff'},field:{marginBottom:12},label:{textAlign:'right',fontWeight:'700',color:'#243746',marginBottom:6},input:{backgroundColor:'#fff',borderWidth:1,borderColor:'#d9e0e5',borderRadius:12,padding:13,textAlign:'right',fontSize:16,color:'#122b3a'},button:{backgroundColor:'#126b62',padding:14,borderRadius:12,alignItems:'center',marginTop:8,marginBottom:6},buttonText:{color:'#fff',fontSize:16,fontWeight:'800'},secondary:{backgroundColor:'#fff',borderWidth:1,borderColor:'#cbd5dc'},secondaryText:{color:'#243746'},note:{fontSize:12,color:'#687782',textAlign:'right',lineHeight:19,marginVertical:10},card:{backgroundColor:'#fff',padding:16,borderRadius:16,marginTop:14,borderWidth:1,borderColor:'#e0e6ea'},cardTitle:{fontSize:18,fontWeight:'800',color:'#122b3a',textAlign:'right',marginBottom:8},item:{fontSize:14,color:'#435460',textAlign:'right',marginVertical:3},footer:{fontSize:12,color:'#687782',textAlign:'center',lineHeight:19,marginTop:24}});
+
+  return (
+    <div style={{ minHeight: '100vh', backgroundColor: '#F8FAFC', color: '#0F172A', fontFamily: 'system-ui, -apple-system, sans-serif', direction: 'rtl', padding: '16px' }}>
+      
+      {/* شريط الملاحة العلوي */}
+      <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', backgroundColor: '#FFFFFF', padding: '12px 20px', borderRadius: '16px', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <div style={{ width: '40px', height: '40px', backgroundColor: '#2563EB', borderRadius: '10px', color: '#FFF', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold', fontSize: '18px' }}>
+            وصلة
+          </div>
+          <div>
+            <h1 style={{ fontSize: '16px', fontWeight: 'bold', margin: 0 }}>وصلة WASLA</h1>
+            <span style={{ fontSize: '12px', color: '#64748B' }}>الخدمة عند الطلب</span>
+          </div>
+        </div>
+        <div style={{ display: 'flex', gap: '8px' }}>
+          <button style={{ padding: '8px 16px', borderRadius: '20px', border: '1px solid #E2E8F0', backgroundColor: '#FFF', cursor: 'pointer', fontSize: '14px' }}>مساعدة</button>
+          <button style={{ padding: '8px 16px', borderRadius: '20px', border: 'none', backgroundColor: '#0F172A', color: '#FFF', cursor: 'pointer', fontSize: '14px', fontWeight: 'bold' }}>الملف الشخصي</button>
+        </div>
+      </header>
+
+      {/* القسم الرئيسي للتطبيق */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '20px', maxWidth: '1200px', margin: '0 auto' }}>
+        
+        {/* العمود الأيمن: الخيارات وتحديد المسار */}
+        <div style={{ backgroundColor: '#FFFFFF', padding: '24px', borderRadius: '24px', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05)' }}>
+          <span style={{ backgroundColor: '#EFF6FF', color: '#2563EB', padding: '4px 12px', borderRadius: '12px', fontSize: '12px', fontWeight: 'bold' }}>خريطة حية</span>
+          <h2 style={{ fontSize: '24px', fontWeight: '800', marginTop: '12px', marginBottom: '20px', lineHeight: '1.3' }}>احصل على مزود موثوق به في دقائق.</h2>
+
+          {/* قائمة أزرار الخدمات */}
+          <div style={{ display: 'flex', gap: '8px', overflowX: 'auto', paddingBottom: '12px', marginBottom: '20px' }}>
+            {services.map((s) => (
+              <button
+                key={s.id}
+                onClick={() => {
+                  setSelectedService(s.id);
+                  setTripRequested(false);
+                }}
+                style={{
+                  padding: '10px 18px',
+                  borderRadius: '20px',
+                  border: 'none',
+                  backgroundColor: selectedService === s.id ? '#2563EB' : '#F1F5F9',
+                  color: selectedService === s.id ? '#FFFFFF' : '#475569',
+                  fontWeight: 'bold',
+                  whiteSpace: 'nowrap',
+                  cursor: 'pointer',
+                  transition: 'all 0.2s'
+                }}
+              >
+                {s.label}
+              </button>
+            ))}
+          </div>
+
+          {/* حقول إدخال نقطة الالتقاط والإنزال */}
+          <div style={{ backgroundColor: '#F8FAFC', padding: '16px', borderRadius: '16px', border: '1px solid #E2E8F0', marginBottom: '20px' }}>
+            <div style={{ marginBottom: '12px' }}>
+              <label style={{ fontSize: '12px', color: '#64748B', display: 'block', marginBottom: '4px' }}>📍 نقطة الالتقاط (من):</label>
+              <input
+                type="text"
+                value={pickup}
+                onChange={(e) => setPickup(e.target.value)}
+                style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid #CBD5E1', fontSize: '14px', outline: 'none' }}
+              />
+            </div>
+            <div>
+              <label style={{ fontSize: '12px', color: '#64748B', display: 'block', marginBottom: '4px' }}>📍 نقطة الإنزال (إلى):</label>
+              <input
+                type="text"
+                value={dropoff}
+                onChange={(e) => setDropoff(e.target.value)}
+                style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid #CBD5E1', fontSize: '14px', outline: 'none' }}
+              />
+            </div>
+          </div>
+
+          <button
+            onClick={handleConfirmOrder}
+            style={{
+              width: '100%',
+              padding: '14px',
+              borderRadius: '12px',
+              border: 'none',
+              backgroundColor: tripRequested ? '#10B981' : '#2563EB',
+              color: '#FFF',
+              fontSize: '16px',
+              fontWeight: 'bold',
+              cursor: 'pointer',
+              transition: 'all 0.2s'
+            }}
+          >
+            {tripRequested ? 'تم تأكيد طلبك بنجاح ✓' : `تأكيد طلب (${selectedService})`}
+          </button>
+
+          {/* بطاقات الإحصائيات السريعة */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '10px', marginTop: '24px' }}>
+            <div style={{ backgroundColor: '#0F172A', color: '#FFF', padding: '12px', borderRadius: '12px', textAlign: 'center' }}>
+              <div style={{ fontSize: '16px', fontWeight: 'bold' }}>1.4K</div>
+              <div style={{ fontSize: '10px', color: '#94A3B8' }}>رحلات اليوم</div>
+            </div>
+            <div style={{ backgroundColor: '#0F172A', color: '#FFF', padding: '12px', borderRadius: '12px', textAlign: 'center' }}>
+              <div style={{ fontSize: '16px', fontWeight: 'bold' }}>{currentServiceObj.est}</div>
+              <div style={{ fontSize: '10px', color: '#94A3B8' }}>متوسط ETA</div>
+            </div>
+            <div style={{ backgroundColor: '#0F172A', color: '#FFF', padding: '12px', borderRadius: '12px', textAlign: 'center' }}>
+              <div style={{ fontSize: '16px', fontWeight: 'bold' }}>98%</div>
+              <div style={{ fontSize: '10px', color: '#94A3B8' }}>نسبة الرضا</div>
+            </div>
+          </div>
+        </div>
+
+        {/* العمود الأيسر: ملخص الرحلة والأسعار والسائق المتاح */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+          
+          
