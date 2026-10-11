@@ -1,77 +1,42 @@
-'use client';
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
+import { Alert, SafeAreaView, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View, ActivityIndicator } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as Location from 'expo-location';
+import { io } from 'socket.io-client';
 
-export default function Home() {
-  const [selectedService, setSelectedService] = useState('ركوب');
-  const [pickup, setPickup] = useState('حي الزهراء');
-  const [dropoff, setDropoff] = useState('طريق الملك فهد');
-  const [isConfirmed, setIsConfirmed] = useState(false);
-
-  const services = [
-    { id: 'ركوب', label: 'ركوب 🚕' },
-    { id: 'طعام', label: 'طعام 🍔' },
-    { id: 'البقالة', label: 'البقالة 🛒' },
-    { id: 'سيارة أجرة', label: 'سيارة أجرة 🚘' },
-    { id: 'ساعي', label: 'ساعي 📦' },
-    { id: 'الرعاية المنزلية', label: 'الرعاية المنزلية 🧰' },
-  ];
-
-  const handleConfirm = () => {
-    setIsConfirmed(true);
-    alert(`تم تأكيد طلب (${selectedService}) من ${pickup} إلى ${dropoff}!`);
+// IMPORTANT: change this to your computer's LAN IP for a physical phone, e.g. http://192.168.1.20:4000
+// Android emulator usually uses http://10.0.2.2:4000. Never use localhost on a physical phone.
+const API_URL = 'http://192.168.1.20:4000';
+const money = n => `${Number(n || 0).toFixed(2)} ر.س`;
+export default function App() {
+  const [mode,setMode] = useState('rider');
+  const [name,setName] = useState(''); const [phone,setPhone] = useState(''); const [password,setPassword] = useState('');
+  const [token,setToken] = useState(null); const [user,setUser] = useState(null); const [busy,setBusy] = useState(false);
+  const [pickup,setPickup] = useState('موقعي الحالي'); const [destination,setDestination] = useState('الوجهة');
+  const [coords,setCoords] = useState(null); const [destLat,setDestLat] = useState('24.7136'); const [destLng,setDestLng] = useState('46.6753');
+  const [rides,setRides] = useState([]); const [activeRide,setActiveRide] = useState(null); const [socket,setSocket] = useState(null);
+  const request = async (path, options={}) => {
+    const res = await fetch(`${API_URL}${path}`, { ...options, headers: { 'Content-Type':'application/json', ...(token ? {Authorization:`Bearer ${token}`} : {}), ...(options.headers||{}) } });
+    const data = await res.json().catch(()=>({})); if (!res.ok) throw new Error(data.error || 'تعذر الاتصال بالخادم'); return data;
   };
-
-  return (
-    <div style={{ padding: '20px', fontFamily: 'sans-serif', direction: 'rtl', maxWidth: '500px', margin: '0 auto', minHeight: '100vh', backgroundColor: '#fff' }}>
-      <h2 style={{ fontSize: '22px', fontWeight: 'bold', marginBottom: '16px' }}>وصلة - الخدمة عند الطلب</h2>
-      
-      {/* أزرار الخدمات التفاعلية */}
-      <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '20px' }}>
-        {services.map((service) => (
-          <button
-            key={service.id}
-            onClick={() => {
-              setSelectedService(service.id);
-              setIsConfirmed(false);
-            }}
-            style={{
-              padding: '10px 16px',
-              borderRadius: '20px',
-              border: 'none',
-              backgroundColor: selectedService === service.id ? '#0052FF' : '#F3F4F6',
-              color: selectedService === service.id ? '#FFFFFF' : '#1F2937',
-              fontWeight: 'bold',
-              cursor: 'pointer',
-            }}
-          >
-            {service.label}
-          </button>
-        ))}
-      </div>
-
-      {/* تفاصيل الموقع والتأكيد */}
-      <div style={{ background: '#F9FAFB', padding: '16px', borderRadius: '12px', border: '1px solid #E5E7EB' }}>
-        <p style={{ marginBottom: '8px' }}>الخدمة المحددة: <strong>{selectedService}</strong></p>
-        <p style={{ marginBottom: '8px' }}>الالتقاط: 📍 {pickup}</p>
-        <p style={{ marginBottom: '16px' }}>الإنزال: 📍 {dropoff}</p>
-
-        <button
-          onClick={handleConfirm}
-          style={{
-            width: '100%',
-            padding: '12px',
-            backgroundColor: isConfirmed ? '#10B981' : '#0052FF',
-            color: '#FFF',
-            border: 'none',
-            borderRadius: '8px',
-            fontSize: '16px',
-            fontWeight: 'bold',
-            cursor: 'pointer',
-          }}
-        >
-          {isConfirmed ? 'تم التأكيد ✓' : 'تأكيد الطلب'}
-        </button>
-      </div>
-    </div>
-  );
+  useEffect(()=>{ (async()=>{ const saved=await AsyncStorage.getItem('mashwar-session'); if(saved){const s=JSON.parse(saved);setToken(s.token);setUser(s.user);setMode(s.user.role);} })(); },[]);
+  useEffect(()=>{ if(!token)return; const s=io(API_URL,{auth:{token},transports:['websocket']}); setSocket(s); s.on('ride:update',r=>{setActiveRide(old=>old?.id===r.id?r:old);setRides(old=>[r,...old.filter(x=>x.id!==r.id)]);}); s.on('ride:available',r=>{if(r)setRides(old=>[r,...old.filter(x=>x.id!==r.id)]);}); return()=>{s.disconnect();setSocket(null);}; },[token]);
+  useEffect(()=>{ if(user) refresh(); },[user]);
+  const refresh = async()=>{ try{const d=await request(user?.role==='driver'?'/api/rides/available':'/api/rides/mine');setRides(d.rides||[]);}catch(e){/* shown on user action */} };
+  const registerOrLogin = async (register) => { setBusy(true); try {const d=await request(register?'/api/auth/register':'/api/auth/login',{method:'POST',body:JSON.stringify(register?{name,phone,password,role:mode}:{phone,password})}); await AsyncStorage.setItem('mashwar-session',JSON.stringify(d));setToken(d.token);setUser(d.user);setMode(d.user.role); } catch(e){Alert.alert('تعذر الدخول',e.message);} finally{setBusy(false);} };
+  const getLocation = async()=>{const p=await Location.requestForegroundPermissionsAsync();if(p.status!=='granted')throw new Error('اسمح للتطبيق بالوصول إلى الموقع');const l=await Location.getCurrentPositionAsync({});setCoords({lat:l.coords.latitude,lng:l.coords.longitude});};
+  const createRide = async()=>{setBusy(true);try{await getLocation();const l=await Location.getCurrentPositionAsync({});const d=await request('/api/rides',{method:'POST',body:JSON.stringify({pickup:{lat:l.coords.latitude,lng:l.coords.longitude,label:pickup},destination:{lat:Number(destLat),lng:Number(destLng),label:destination}})});setActiveRide(d.ride);setRides([d.ride,...rides]);socket?.emit('ride:join',d.ride.id);Alert.alert('تم الطلب',`التقدير الأولي: ${money(d.ride.fare_sar)}. السعر ليس نهائيًا.`);}catch(e){Alert.alert('تعذر طلب الرحلة',e.message);}finally{setBusy(false);}};
+  const accept = async r=>{try{const d=await request(`/api/rides/${r.id}/accept`,{method:'POST'});setActiveRide(d.ride);socket?.emit('ride:join',r.id);Alert.alert('تم قبول الرحلة','تواصل مع الراكب عبر القنوات المعتمدة في تطبيقك.');}catch(e){Alert.alert('تعذر القبول',e.message);}};
+  const status = async (r,s)=>{try{const d=await request(`/api/rides/${r.id}/status`,{method:'POST',body:JSON.stringify({status:s})});setActiveRide(d.ride);setRides(old=>old.map(x=>x.id===r.id?d.ride:x));}catch(e){Alert.alert('تعذر تحديث الرحلة',e.message);}};
+  const cancel = async r=>{try{const d=await request(`/api/rides/${r.id}/cancel`,{method:'POST'});setActiveRide(d.ride);setRides(old=>old.map(x=>x.id===r.id?d.ride:x));}catch(e){Alert.alert('تعذر الإلغاء',e.message);}};
+  const logout=async()=>{await AsyncStorage.removeItem('mashwar-session');socket?.disconnect();setToken(null);setUser(null);setActiveRide(null);setRides([]);};
+  const btn=(label,onPress,secondary=false)=><TouchableOpacity style={[styles.button,secondary&&styles.secondary]} onPress={onPress} disabled={busy}><Text style={[styles.buttonText,secondary&&styles.secondaryText]}>{label}</Text></TouchableOpacity>;
+  const field=(label,value,onChange,placeholder='',keyboardType='default')=><View style={styles.field}><Text style={styles.label}>{label}</Text><TextInput style={styles.input} value={value} onChangeText={onChange} placeholder={placeholder} keyboardType={keyboardType} placeholderTextColor="#89929b"/></View>;
+  if(!token)return <SafeAreaView style={styles.safe}><ScrollView contentContainerStyle={styles.container}><Text style={styles.brand}>مشوار</Text><Text style={styles.subtitle}>رحلتك تبدأ هنا</Text><View style={styles.switch}>{['rider','driver'].map(x=><TouchableOpacity key={x} style={[styles.pill,mode===x&&styles.pillActive]} onPress={()=>setMode(x)}><Text style={[styles.pillText,mode===x&&styles.pillTextActive]}>{x==='rider'?'راكب':'سائق'}</Text></TouchableOpacity>)}</View>{mode==='driver'&&<Text style={styles.note}>التسجيل كسائق هنا تجريبي ولا يتحقق من الهوية أو رخصة القيادة أو أهلية المركبة.</Text>}{field('الاسم (للتسجيل)',name,setName,'الاسم')}{field('رقم الجوال',phone,setPhone,'05xxxxxxxx','phone-pad')}{field('كلمة المرور',password,setPassword,'8 أحرف على الأقل')}{busy?<ActivityIndicator/>:<>{btn('إنشاء حساب',()=>registerOrLogin(true))}{btn('لدي حساب — تسجيل الدخول',()=>registerOrLogin(false),true)}</>}</ScrollView></SafeAreaView>;
+  return <SafeAreaView style={styles.safe}><ScrollView contentContainerStyle={styles.container}><View style={styles.header}><View><Text style={styles.brand}>مشوار</Text><Text style={styles.subtitle}>مرحبًا {user?.name}</Text></View>{btn('خروج',logout,true)}</View><View style={styles.switch}>{['rider','driver'].map(x=><TouchableOpacity key={x} style={[styles.pill,mode===x&&styles.pillActive]} onPress={()=>setMode(x)}><Text style={[styles.pillText,mode===x&&styles.pillTextActive]}>{x==='rider'?'راكب':'سائق'}</Text></TouchableOpacity>)}</View>
+  {mode==='rider'?<><Text style={styles.section}>اطلب مشوارك</Text>{field('نقطة الانطلاق',pickup,setPickup,'موقعي الحالي')}{field('الوجهة',destination,setDestination,'اسم المكان')}{field('خط العرض للوجهة',destLat,setDestLat,'24.7136','decimal-pad')}{field('خط الطول للوجهة',destLng,setDestLng,'46.6753','decimal-pad')}{btn(busy?'جارٍ التنفيذ...':'تحديد موقعي وطلب رحلة',createRide)}<Text style={styles.note}>نسخة تجريبية: تدخل إحداثيات الوجهة يدويًا. الخريطة والتوجيه الفعلي وحساب السعر النهائي غير مفعّلة.</Text></>:<><Text style={styles.section}>الرحلات المتاحة</Text>{btn('تحديث الرحلات',refresh,true)}</>}
+  {activeRide&&<View style={styles.card}><Text style={styles.cardTitle}>الرحلة الحالية #{activeRide.id}</Text><Text style={styles.item}>الحالة: {activeRide.status}</Text><Text style={styles.item}>من: {activeRide.pickup_label}</Text><Text style={styles.item}>إلى: {activeRide.dest_label}</Text><Text style={styles.item}>التقدير: {money(activeRide.fare_sar)}</Text>{activeRide.status==='accepted'&&mode==='driver'&&btn('وصلت إلى الراكب',()=>status(activeRide,'arrived'))}{activeRide.status==='arrived'&&mode==='driver'&&btn('بدء الرحلة',()=>status(activeRide,'in_progress'))}{activeRide.status==='in_progress'&&mode==='driver'&&btn('إنهاء الرحلة',()=>status(activeRide,'completed'))}{!['completed','cancelled'].includes(activeRide.status)&&btn('إلغاء الرحلة',()=>cancel(activeRide),true)}</View>}
+  {rides.map(r=><View key={r.id} style={styles.card}><Text style={styles.cardTitle}>رحلة #{r.id}</Text><Text style={styles.item}>من: {r.pickup_label}</Text><Text style={styles.item}>إلى: {r.dest_label}</Text><Text style={styles.item}>الحالة: {r.status} · {money(r.fare_sar)}</Text>{mode==='driver'&&r.status==='searching'&&btn('قبول الرحلة',()=>accept(r))}{mode==='rider'&&r.rider_id===user?.id&&!['completed','cancelled'].includes(r.status)&&btn('إلغاء الرحلة',()=>cancel(r),true)}</View>)}
+  <Text style={styles.footer}>نسخة تطوير أولية — لا تستخدم لنقل ركاب فعليين قبل إكمال الأمن والخرائط والدفع والتحقق من السائقين والامتثال للأنظمة.</Text></ScrollView></SafeAreaView>;
 }
+const styles=StyleSheet.create({safe:{flex:1,backgroundColor:'#f4f6f8'},container:{padding:22,paddingBottom:40},header:{flexDirection:'row',justifyContent:'space-between',alignItems:'center'},brand:{fontSize:34,fontWeight:'900',color:'#122b3a',textAlign:'right'},subtitle:{fontSize:15,color:'#65727c',textAlign:'right',marginBottom:18},section:{fontSize:22,fontWeight:'800',color:'#122b3a',textAlign:'right',marginTop:18,marginBottom:10},switch:{flexDirection:'row',backgroundColor:'#e4e9ed',padding:4,borderRadius:14,marginBottom:18},pill:{flex:1,padding:12,borderRadius:11,alignItems:'center'},pillActive:{backgroundColor:'#122b3a'},pillText:{fontWeight:'700',color:'#344652'},pillTextActive:{color:'#fff'},field:{marginBottom:12},label:{textAlign:'right',fontWeight:'700',color:'#243746',marginBottom:6},input:{backgroundColor:'#fff',borderWidth:1,borderColor:'#d9e0e5',borderRadius:12,padding:13,textAlign:'right',fontSize:16,color:'#122b3a'},button:{backgroundColor:'#126b62',padding:14,borderRadius:12,alignItems:'center',marginTop:8,marginBottom:6},buttonText:{color:'#fff',fontSize:16,fontWeight:'800'},secondary:{backgroundColor:'#fff',borderWidth:1,borderColor:'#cbd5dc'},secondaryText:{color:'#243746'},note:{fontSize:12,color:'#687782',textAlign:'right',lineHeight:19,marginVertical:10},card:{backgroundColor:'#fff',padding:16,borderRadius:16,marginTop:14,borderWidth:1,borderColor:'#e0e6ea'},cardTitle:{fontSize:18,fontWeight:'800',color:'#122b3a',textAlign:'right',marginBottom:8},item:{fontSize:14,color:'#435460',textAlign:'right',marginVertical:3},footer:{fontSize:12,color:'#687782',textAlign:'center',lineHeight:19,marginTop:24}});
