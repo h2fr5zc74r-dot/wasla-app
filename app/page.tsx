@@ -28,11 +28,14 @@ export default function Home() {
     setBookingStatus('idle');
   };
 
+  // رابط الخريطة التفاعلية الحقيقية يتحدث ديناميكياً حسب موقع الانطلاق
+  const mapSrc = `https://maps.google.com/maps?q=${encodeURIComponent(pickup + ' السعودية')}&t=&z=13&ie=UTF8&iwloc=&output=embed`;
+
   return (
     <div style={{ minHeight: '100vh', backgroundColor: '#F8FAFC', color: '#0F172A', fontFamily: 'system-ui, sans-serif', direction: 'rtl', padding: '16px' }}>
       
       {/* شريط الملاحة العلوي */}
-      <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', backgroundColor: '#FFFFFF', padding: '12px 16px', borderRadius: '16px', boxShadow: '0 1px 3px rgba(0,0,0,0.05)', maxWidth: '500px', margin: '0 auto 20px auto' }}>
+      <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', backgroundColor: '#FFFFFF', padding: '12px 16px', borderRadius: '16px', boxShadow: '0 1px 3px rgba(0,0,0,0.05)', maxWidth: '500px', margin: '0 auto 16px auto' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           <div style={{ width: '36px', height: '36px', backgroundColor: '#2563EB', borderRadius: '8px', color: '#FFF', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold', fontSize: '14px' }}>
             وصلة
@@ -42,14 +45,24 @@ export default function Home() {
             <span style={{ fontSize: '11px', color: '#64748B' }}>الخدمة عند الطلب</span>
           </div>
         </div>
-        <div style={{ display: 'flex', gap: '6px' }}>
-          <span style={{ padding: '6px 12px', borderRadius: '16px', backgroundColor: '#EFF6FF', color: '#2563EB', fontSize: '12px', fontWeight: 'bold' }}>نشط</span>
-        </div>
+        <span style={{ padding: '6px 12px', borderRadius: '16px', backgroundColor: '#EFF6FF', color: '#2563EB', fontSize: '12px', fontWeight: 'bold' }}>نشط</span>
       </header>
 
       {/* محتوى التطبيق */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', maxWidth: '500px', margin: '0 auto' }}>
         
+        {/* الخريطة التفاعلية الحقيقية */}
+        <div style={{ width: '100%', height: '220px', borderRadius: '20px', overflow: 'hidden', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05)', border: '1px solid #E2E8F0' }}>
+          <iframe
+            title="خريطة الموقع"
+            width="100%"
+            height="100%"
+            style={{ border: 0 }}
+            loading="lazy"
+            src={mapSrc}
+          ></iframe>
+        </div>
+
         {bookingStatus === 'idle' && (
           <>
             {/* واجهة اختيار الخدمات والمواقع */}
@@ -83,7 +96,7 @@ export default function Home() {
               {/* حقول الإدخال للمناطق */}
               <div style={{ backgroundColor: '#F8FAFC', padding: '14px', borderRadius: '14px', border: '1px solid #E2E8F0', marginBottom: '16px' }}>
                 <div style={{ marginBottom: '10px' }}>
-                  <label style={{ fontSize: '11px', color: '#64748B', display: 'block', marginBottom: '4px' }}>📍 موقع الانطلاق (من):</label>
+                  <label style={{ fontSize: '11px', color: '#64748B', display: 'block', marginBottom: '4px' }}>📍 موقع الانطلاق (من - يتحدث على الخريطة):</label>
                   <input
                     type="text"
                     value={pickup}
